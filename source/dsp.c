@@ -1,13 +1,27 @@
+/* *
+* Copyright (C) 2017 zoogie
+
+* Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+* The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+* THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+* */
+
+
+#include "dsp.h"
+
+#include <3ds.h>
+
 #include <stdio.h>
 #include <string.h>
-#include <3ds.h>
 #include <stdlib.h>
+
 #include <sys/stat.h>
 #include <unistd.h>
+
 #include "sha256.h"
-#include "dsptest.h"
-#include "sound_bgr.h"
-#define NB_TITLES (sizeof(titles)/sizeof(TitleInfo))
 
 typedef struct {
 	u64 titleid;
@@ -25,8 +39,10 @@ TitleInfo titles[] = {
 
 };
 
-// decompression code stolen from ctrtool
+#define NB_TITLES (sizeof(titles)/sizeof(TitleInfo))
 
+
+// decompression code stolen from ctrtool
 u32 getle32(const u8* p)
 {
 	return (p[0]<<0) | (p[1]<<8) | (p[2]<<16) | (p[3]<<24);
@@ -130,7 +146,6 @@ int lzss_decompress(u8* compressed, u32 compressedsize, u8* decompressed, u32 de
 	return -1;
 }
 
-
 Result openCode(Handle* out, u64 tid, u8 mediatype)
 {
 	if(!out)return -1;
@@ -190,12 +205,19 @@ int checkHashes(u8 *base){
 	return fail;
 }
 
+Result dsp_test(void) {	
+	Result res = ndspInit();
+	ndspExit();
+	return res;
+}
+
 Result dumpCode(u64 tid , char* path)
 {
 	Result ret;
 	Handle fileHandle;
 
 	ret = openCode(&fileHandle, tid, 0);
+	if (R_FAILED(ret)) return ret;
 
 	char name[50];
 
@@ -207,17 +229,20 @@ Result dumpCode(u64 tid , char* path)
 	u32 bytesRead;
 
 	ret = FSFILE_GetSize(fileHandle, &fileSize);
-	if(ret)return ret;
+	if (R_FAILED(ret)) return ret;
 	fileBuffer = malloc(fileSize);
-	if(ret)return ret;
+	if (fileBuffer == NULL) return ERROR_ALLOC;
 	ret = FSFILE_Read(fileHandle, &bytesRead, 0x0, fileBuffer, fileSize);
-	if(ret)return ret;
+	if (R_FAILED(ret)) return ret;
 	ret = FSFILE_Close(fileHandle);
-	if(ret)return ret;
+	if (R_FAILED(ret)) return ret;
 
 	u32 decompressedSize = lzss_get_decompressed_size(fileBuffer, fileSize);
 	u8* decompressedBuffer = linearMemAlign(decompressedSize, 0x1000);
-	if(!decompressedBuffer)return 1;
+	if (decompressedBuffer == NULL) {
+		free(fileBuffer);
+		return ERROR_ALIGN;
+	}
 
 	lzss_decompress(fileBuffer, fileSize, decompressedBuffer, decompressedSize);
 	free(fileBuffer);
@@ -227,97 +252,53 @@ Result dumpCode(u64 tid , char* path)
 	u32 dsp_size = 0;
 	
 	dsp_loc = (u8*)memmem(decompressedBuffer , decompressedSize, magic, 4);
-	if(dsp_loc){
+	if (dsp_loc) {
 		printf("Magic found! Beginning dsp dump! ...\n");
 		dsp_size = *(u32*)(dsp_loc + 4);  //size usually 0xC25C
 		dsp_loc -= 0x100;
 		
-		if(!checkHashes(dsp_loc)) printf("Sha256 verified! Size: %08X\nWriting dsp firm now ...\n", (int)dsp_size);
-		else{
-			printf("\x1b[31;1m");  //red text for scaring people
-			printf("Sha256 mismatch! Size: %08X\n", (int)dsp_size);
-			printf("Dsp firm will be dumped, but it may not work!\n");
-			printf("\x1b[37;1m");  //back to white
-			//linearFree(decompressedBuffer);
-			//return 2;
+		if (checkHashes(dsp_loc)) {
+			ret = ERROR_HASH;
+			goto end;
 		}
 		
 		FILE* f = fopen("sdmc:/3ds/dspfirm.cdc", "wb");
-		if(!f) { linearFree(decompressedBuffer); return 2; }
+		if (!f) {
+			ret = ERROR_OPENFILE;
+			goto end;
+		}
 		fwrite(dsp_loc, 1, dsp_size, f);
 		fclose(f);
-		
-		printf("\nDsp firm written to: sdmc:/3ds/dspfirm.cdc\n\n");
-		dsp_test();
-		printf("No more action required!\n");
 	}
-	else{
-		printf("Dsp magic not found!\n");
-		linearFree(decompressedBuffer);
-		return 1;
-	}
+	else ret = ERROR_MAGIC;
 	
+	end:
 	linearFree(decompressedBuffer);
-	return 0;
+	return ret;
 }
 
-int main(int argc, char** argv)
-{
-	int i = 0;
-	// Initialize services
-	gfxInitDefault();
-
-	// Init console for text output
-	consoleInit(GFX_TOP, NULL);
-	Result res;
+Result ensureDSP(void)
+{	
+	Result res = 0;
 	
 	mkdir("sdmc:/3ds", 0777);
 	
-	int screen_char_total=50*30;
-	printf("\x1b[44;1m");          //blue background over entire screen
-	while(screen_char_total--)printf(" ");
-	printf("\x1b[0;0H"); //back to white text and cursor to top left corner
-	
-	printf("                  DSP1 - zoogie\n\n\n");  //(50 - 13) / 2 = 18
-	printf("Extracting home menu .code ...\n");
-	
-	gfxSetDoubleBuffering(GFX_BOTTOM, false);
-	u8 *fb = gfxGetFramebuffer(GFX_BOTTOM, GFX_LEFT, NULL, NULL);
-	memcpy(fb, sound_bgr, sound_bgr_size);
+	//no need to dump it if the file exists
+	FILE fh = fopen("sdmc:/3ds/dspfirm.cdc", "rb");
+	if (fh != NULL) {
+		fclose(fh);
+		return res;
+	}
 
 	for(i = 0; i < NB_TITLES; ++i){
-		TitleInfo tl=titles[i];
+		TitleInfo tl = titles[i];
 		res = dumpCode(tl.titleid, tl.name);
-		if(res)  printf("Not found: %s %08X\n", tl.name, (int)res);
-		else break;
+		//if the title was found, the file was dumped and all is well
+		if (R_SUCCESS(res)) {
+			res = dsp_test();
+			break
+		}
 	}
 	
-	printf("\n\nSTART: Exit to home menu.\n    B: Delete this app then exit to home menu.\n");
-	// Main loop
-	while (aptMainLoop())
-	{
-		hidScanInput();
-
-		u32 kDown = hidKeysDown();
-		if (kDown & KEY_START)
-			break; // break in order to return to hbmenu
-		else if (kDown & KEY_B)
-		{
-			amInit();
-			res = AM_DeleteAppTitle(MEDIATYPE_SD, (u64)0x0004000000D59100);
-			if(res) printf("\nSelf-delete failed, call in the FBI!\n");
-			else    printf("\nSelf-delete success!\n");
-			svcSleepThread(500*1000*1000);
-			break;
-		}
-
-		// Flush and swap framebuffers
-		gfxFlushBuffers();
-		gfxSwapBuffers();
-		gspWaitForVBlank();
-	}
-
-	// Exit services
-	gfxExit();
-	return 0;
+	return res;
 }
