@@ -295,7 +295,7 @@ Result ensureDSP(void)
 		TitleInfo tl = titles[i];
 		res = dumpCode(tl.titleid, tl.name);
 		//if the title was found, the file was dumped and all is well
-		if (R_SUCCESS(res)) {
+		if (R_SUCCEEDED(res)) {
 			res = dsp_test();
 			break;
 		}
