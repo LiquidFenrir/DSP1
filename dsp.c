@@ -231,7 +231,7 @@ Result dumpCode(u64 tid , char* path)
 	ret = FSFILE_GetSize(fileHandle, &fileSize);
 	if (R_FAILED(ret)) return ret;
 	fileBuffer = malloc(fileSize);
-	if (fileBuffer == NULL) return ERROR_ALLOC;
+	if (fileBuffer == NULL) return ENSUREDSP_ERROR_ALLOC;
 	ret = FSFILE_Read(fileHandle, &bytesRead, 0x0, fileBuffer, fileSize);
 	if (R_FAILED(ret)) return ret;
 	ret = FSFILE_Close(fileHandle);
@@ -241,7 +241,7 @@ Result dumpCode(u64 tid , char* path)
 	u8* decompressedBuffer = linearMemAlign(decompressedSize, 0x1000);
 	if (decompressedBuffer == NULL) {
 		free(fileBuffer);
-		return ERROR_ALIGN;
+		return ENSUREDSP_ERROR_ALIGN;
 	}
 
 	lzss_decompress(fileBuffer, fileSize, decompressedBuffer, decompressedSize);
@@ -258,19 +258,19 @@ Result dumpCode(u64 tid , char* path)
 		dsp_loc -= 0x100;
 		
 		if (checkHashes(dsp_loc)) {
-			ret = ERROR_HASH;
+			ret = ENSUREDSP_ERROR_HASH;
 			goto end;
 		}
 		
 		FILE* f = fopen("sdmc:/3ds/dspfirm.cdc", "wb");
 		if (!f) {
-			ret = ERROR_OPENFILE;
+			ret = ENSUREDSP_ERROR_OPENFILE;
 			goto end;
 		}
 		fwrite(dsp_loc, 1, dsp_size, f);
 		fclose(f);
 	}
-	else ret = ERROR_MAGIC;
+	else ret = ENSUREDSP_ERROR_MAGIC;
 	
 	end:
 	linearFree(decompressedBuffer);
