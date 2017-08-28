@@ -284,13 +284,13 @@ Result ensureDSP(void)
 	mkdir("sdmc:/3ds", 0777);
 	
 	//no need to dump it if the file exists
-	FILE fh = fopen("sdmc:/3ds/dspfirm.cdc", "rb");
+	FILE * fh = fopen("sdmc:/3ds/dspfirm.cdc", "rb");
 	if (fh != NULL) {
 		fclose(fh);
 		return res;
 	}
 
-	for(i = 0; i < NB_TITLES; ++i){
+	for(int i = 0; i < NB_TITLES; ++i){
 		TitleInfo tl = titles[i];
 		res = dumpCode(tl.titleid, tl.name);
 		//if the title was found, the file was dumped and all is well
