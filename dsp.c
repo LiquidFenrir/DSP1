@@ -296,7 +296,7 @@ Result ensureDSP(void)
 		//if the title was found, the file was dumped and all is well
 		if (R_SUCCESS(res)) {
 			res = dsp_test();
-			break
+			break;
 		}
 	}
 	
